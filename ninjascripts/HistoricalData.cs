@@ -13,9 +13,6 @@ namespace NinjaTrader.NinjaScript.Strategies
     public class HistoricalData : Strategy
     {
         private string filePath;
-        private bool isFileInitialized = false;
-
-        // EMA Indicators
         private EMA ema21;
         private EMA ema75;
         private EMA ema150;
@@ -24,22 +21,36 @@ namespace NinjaTrader.NinjaScript.Strategies
         {
             if (State == State.SetDefaults)
             {
-                Description = @"Historical hourly data feed for FVG detection";
-                Name = "HistoricalData";
-                Calculate = Calculate.OnBarClose;  // Only write completed bars
+                Description         = @"Historical bar data feed for FVG detection — writes OHLC + EMAs on each bar close.";
+                Name                = "HistoricalData";
+                Calculate           = Calculate.OnBarClose;
                 EntriesPerDirection = 1;
                 BarsRequiredToTrade = 20;
-            }
-            else if (State == State.Configure)
-            {
-                filePath = @"C:\Users\Joshua\Documents\Projects\FVG Bot\data\HistoricalData.csv";
+
+                HistoricalDataFilePath = @"C:\FVGBot\data\HistoricalData.csv";
             }
             else if (State == State.DataLoaded)
             {
-                // Initialize EMA indicators
-                ema21 = EMA(21);
-                ema75 = EMA(75);
+                filePath = HistoricalDataFilePath;
+
+                ema21  = EMA(21);
+                ema75  = EMA(75);
                 ema150 = EMA(150);
+
+                // Write header once — prevents mid-session reload from wiping live data.
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+                    if (!File.Exists(filePath))
+                    {
+                        using (StreamWriter w = new StreamWriter(filePath, false))
+                            w.WriteLine("DateTime,Open,High,Low,Close,EMA21,EMA75,EMA150");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Print($"HistoricalData init error: {ex.Message}");
+                }
             }
         }
 
@@ -48,55 +59,28 @@ namespace NinjaTrader.NinjaScript.Strategies
             if (CurrentBar < BarsRequiredToTrade)
                 return;
 
-            // Safety check to ensure bar data is valid
-            if (Bars == null || CurrentBar < 0)
-                return;
-
-            if (!isFileInitialized)
-            {
-                InitializeFile();
-                isFileInitialized = true;
-            }
-
-            AppendDataToFile();
-        }
-
-        private void InitializeFile()
-        {
             try
             {
-                // Create file with header
-                using (StreamWriter writer = new StreamWriter(filePath, false))
+                using (StreamWriter w = new StreamWriter(filePath, true))
                 {
-                    writer.WriteLine("DateTime,Open,High,Low,Close,EMA21,EMA75,EMA150");
+                    w.WriteLine(
+                        $"{Time[0]:yyyy-MM-dd HH:mm:ss},{Open[0]:F2},{High[0]:F2},{Low[0]:F2},{Close[0]:F2}," +
+                        $"{ema21[0]:F2},{ema75[0]:F2},{ema150[0]:F2}");
                 }
             }
             catch (Exception ex)
             {
-                Print($"HistoricalData Error initializing file: {ex.Message}");
+                Print($"HistoricalData write error: {ex.Message}");
             }
         }
 
-        private void AppendDataToFile()
-        {
-            try
-            {
-                // Safety checks before accessing bar data
-                if (Time.Count == 0 || Open.Count == 0 || High.Count == 0 || Low.Count == 0 || Close.Count == 0)
-                    return;
+        #region Properties
 
-                // Write completed bar to file with EMA values
-                using (StreamWriter writer = new StreamWriter(filePath, true))
-                {
-                    writer.WriteLine(
-                        $"{Time[0]:MM/dd/yyyy HH:mm:ss},{Open[0]:F2},{High[0]:F2},{Low[0]:F2},{Close[0]:F2},{ema21[0]:F2},{ema75[0]:F2},{ema150[0]:F2}"
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                Print($"HistoricalData Error writing to file: {ex.Message}");
-            }
-        }
+        [NinjaScriptProperty]
+        [Display(Name = "Historical Data File Path", GroupName = "HistoricalData Parameters", Order = 1,
+                 Description = "File that Python reads for bar history and indicator values.")]
+        public string HistoricalDataFilePath { get; set; }
+
+        #endregion
     }
 }

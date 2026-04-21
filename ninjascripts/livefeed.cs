@@ -13,21 +13,34 @@ namespace NinjaTrader.NinjaScript.Strategies
     public class LiveFeed : Strategy
     {
         private string filePath;
-        private bool isFileInitialized = false;
 
         protected override void OnStateChange()
         {
             if (State == State.SetDefaults)
             {
-                Description = @"Live price feed - Real-time current price";
-                Name = "LiveFeed";
-                Calculate = Calculate.OnEachTick;  // Real-time price updates
+                Description         = @"Live price feed - writes current price to a single-row file.";
+                Name                = "LiveFeed";
+                Calculate           = Calculate.OnEachTick;
                 EntriesPerDirection = 1;
                 BarsRequiredToTrade = 20;
+
+                LiveFeedFilePath = @"C:\FVGBot\data\LiveFeed.csv";
             }
-            else if (State == State.Configure)
+            else if (State == State.DataLoaded)
             {
-                filePath = @"C:\Users\Joshua\Documents\Projects\FVG Bot\data\LiveFeed.csv";
+                filePath = LiveFeedFilePath;
+
+                // Write header once at load time
+                try
+                {
+                    Directory.CreateDirectory(Path.GetDirectoryName(filePath));
+                    using (StreamWriter w = new StreamWriter(filePath, false))
+                        w.WriteLine("DateTime,Last");
+                }
+                catch (Exception ex)
+                {
+                    Print($"LiveFeed init error: {ex.Message}");
+                }
             }
         }
 
@@ -36,55 +49,28 @@ namespace NinjaTrader.NinjaScript.Strategies
             if (CurrentBar < BarsRequiredToTrade)
                 return;
 
-            // Safety check to ensure bar data is valid
-            if (Bars == null || CurrentBar < 0)
-                return;
-
-            if (!isFileInitialized)
-            {
-                InitializeFile();
-                isFileInitialized = true;
-            }
-
-            AppendDataToFile();
-        }
-
-        private void InitializeFile()
-        {
+            // Overwrite with a single current-price row — Python only needs the latest tick.
             try
             {
-                // Create file with header - open and close immediately
-                using (StreamWriter writer = new StreamWriter(filePath, false))
+                using (StreamWriter w = new StreamWriter(filePath, false))
                 {
-                    writer.WriteLine("DateTime,Last");
+                    w.WriteLine("DateTime,Last");
+                    w.WriteLine($"{Time[0]:yyyy-MM-dd HH:mm:ss},{Close[0]:F2}");
                 }
             }
             catch (Exception ex)
             {
-                Print($"Error initializing file: {ex.Message}");
+                Print($"LiveFeed write error: {ex.Message}");
             }
         }
 
-        private void AppendDataToFile()
-        {
-            try
-            {
-                // Safety checks before accessing bar data
-                if (Time.Count == 0 || Open.Count == 0 || High.Count == 0 || Low.Count == 0 || Close.Count == 0)
-                    return;
+        #region Properties
 
-                // Write current price tick to file
-                using (StreamWriter writer = new StreamWriter(filePath, true))
-                {
-                    writer.WriteLine(
-                        $"{DateTime.Now:MM/dd/yyyy HH:mm:ss},{Close[0]:F2}"
-                    );
-                }
-            }
-            catch (Exception ex)
-            {
-                Print($"Error writing to file: {ex.Message}");
-            }
-        }
+        [NinjaScriptProperty]
+        [Display(Name = "Live Feed File Path", GroupName = "LiveFeed Parameters", Order = 1,
+                 Description = "File that Python reads for the current market price.")]
+        public string LiveFeedFilePath { get; set; }
+
+        #endregion
     }
 }
